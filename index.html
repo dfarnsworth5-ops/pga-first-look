@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PGA DFS First Look</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  /* Look: a dark course-green leaderboard with gold accents, matching Noto's player cards.
+     Light mode keeps the green header and switches the table to a soft fairway white. */
+  :root {
+    --hdr-1: #163a28;  --hdr-2: #0f2a1d;   /* header + table head (both themes) */
+    --gold: #e8c766;   --gold-ink: #13261b;
+    --bg: #f3f5f0;     --panel: #ffffff;   --panel-2: #eef2ea;
+    --line: #dde3d9;   --text: #13261b;    --muted: #5b6e60;
+    --row-alt: #f6f8f3; --hover: #e9efe4;  --group-line: #b89a4e; --gold-strong: #8a6a12;
+    /* finish tiers (same breakpoints as the old table: 1-10, 11-25, 26+, MC) */
+    --win-bg: #e8c766;  --win-tx: #13261b;
+    --t10-bg: #2f9e62;  --t10-tx: #ffffff;
+    --t25-bg: #b8e2b4;  --t25-tx: #13261b;
+    --made-bg: #ece6cc; --made-tx: #4a4630;
+    --mc-bg: #f2bdb5;   --mc-tx: #6a1a12;
+    --display: "Oswald", "Arial Narrow", sans-serif;
+    --body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  }
+  body.dark {
+    --bg: #0a1510;     --panel: #0f2119;   --panel-2: #132a1f;
+    --line: #1f3a2c;   --text: #e9f0ea;    --muted: #93a99a;
+    --row-alt: #11261c; --hover: #18352a;  --group-line: #c9a94f; --gold-strong: #e8c766;
+    --t25-bg: #2d5e40;  --t25-tx: #dff3e2;
+    --made-bg: #3a3926; --made-tx: #ece3b8;
+    --mc-bg: #5e2723;   --mc-tx: #ffd2cb;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: var(--body); font-size: 12px; font-variant-numeric: tabular-nums;
+  }
+  /* The shell fills the frame; the header, tabs and toolbar stay put and only the table scrolls. */
+  .shell {
+    border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel);
+    display: flex; flex-direction: column; height: 100vh; height: 100dvh; min-height: 420px;
+  }
+  .header, .tabs, .toolbar, .legend { flex: 0 0 auto; }
+  #fieldView { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+
+  /* ---------- Header ---------- */
+  .header {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
+    padding: 14px 18px 13px; color: #fff;
+    background:
+      repeating-linear-gradient(90deg, rgba(255,255,255,.03) 0 26px, transparent 26px 52px),
+      linear-gradient(160deg, var(--hdr-1), var(--hdr-2) 70%);
+    border-bottom: 3px solid var(--gold);
+  }
+  .brand { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .brand-top { font-size: 10px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; color: var(--gold); }
+  .brand-title { font-family: var(--display); font-weight: 700; font-size: 22px; line-height: 1.05; letter-spacing: .02em; text-transform: uppercase; }
+  .header-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  .theme-toggle {
+    background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.22); color: #fff;
+    border-radius: 6px; padding: 5px 9px; font-size: 13px; cursor: pointer;
+  }
+
+  /* ---------- Tabs + toolbar ---------- */
+  .tabs { display: flex; overflow-x: auto; background: var(--panel-2); border-bottom: 1px solid var(--line); }
+  .tab-btn {
+    flex: 0 0 auto; padding: 10px 16px; background: none; border: none; border-bottom: 3px solid transparent;
+    font: 600 12px var(--body); color: var(--muted); cursor: pointer; white-space: nowrap;
+  }
+  .tab-btn.active { color: var(--text); border-bottom-color: var(--gold); background: var(--panel); }
+  .toolbar {
+    display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center;
+    padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  .toolbar input, .toolbar select, .tool-btn {
+    font: 500 12px var(--body); color: var(--text); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px;
+  }
+  #search { width: 200px; max-width: 100%; }
+  .tool-btn { cursor: pointer; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button {
+    font: 600 12px var(--body); color: var(--muted); background: var(--panel);
+    border: none; padding: 6px 11px; cursor: pointer;
+  }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button.on { background: var(--hdr-1); color: #fff; }
+  .tool-label { font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  .tool-group { display: inline-flex; align-items: center; gap: 6px; }
+  .col-panel {
+    display: none; position: absolute; z-index: 20; top: calc(100% + 4px); left: 0;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.18); min-width: 210px; max-height: 360px; overflow-y: auto;
+  }
+  .col-panel.open { display: block; }
+  .col-panel h4 { margin: 8px 0 3px; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  .col-panel h4:first-of-type { margin-top: 2px; }
+  .col-panel label { display: block; padding: 2px 0; font-size: 12px; cursor: pointer; }
+  .col-panel .row-actions { display: flex; gap: 6px; margin-bottom: 4px; }
+
+  /* ---------- Table ---------- */
+  .table-wrap { flex: 1 1 auto; min-height: 0; overflow: auto; position: relative; background: var(--panel); }
+  table { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; }
+  thead th {
+    position: sticky; z-index: 3; background: var(--hdr-2); color: #fff;
+    font-weight: 700; white-space: nowrap; user-select: none;
+  }
+  thead tr.groups th {
+    top: 0; height: 24px; padding: 0 8px; font-size: 9.5px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--gold); text-align: center; background: var(--hdr-1);
+  }
+  thead tr.cols th {
+    top: 24px; padding: 8px 6px; font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase;
+    text-align: center; cursor: pointer; border-bottom: 3px solid var(--gold); min-width: 58px;
+  }
+  thead tr.cols th.form { min-width: 40px; padding: 8px 3px; font-size: 10px; }
+  thead th.name-h { left: 0; z-index: 5; text-align: left; min-width: 170px; }
+  thead tr.groups th.name-h { padding: 0 12px; text-align: left; }
+  thead tr.cols th.name-h { padding: 8px 12px; text-align: left; }
+  .arrow { color: var(--gold); margin-left: 3px; font-size: 9px; }
+  /* Section dividers: one solid gold line from the group label down through every row */
+  th.gstart, td.gstart { border-left: 3px solid var(--group-line); }
+  thead th.gstart { border-left-color: #c9a94f; }
+  thead th.name-h { box-shadow: 3px 0 0 #c9a94f; }
+  /* A thin gap on each side of the gold line keeps it visible even between two shaded cells */
+  tbody td.gstart { box-shadow: inset 3px 0 0 var(--panel); }
+  tbody td.gend { box-shadow: inset -3px 0 0 var(--panel); }
+  tbody td.gstart.gend { box-shadow: inset 3px 0 0 var(--panel), inset -3px 0 0 var(--panel); }
+
+  tbody td {
+    padding: 8px 6px; text-align: center; white-space: nowrap; border-bottom: 1px solid var(--line);
+    min-width: 58px; background: var(--panel);
+  }
+  tbody tr:nth-child(even) td { background: var(--row-alt); }
+  tbody tr:hover td { background: var(--hover); }
+  tbody td.name {
+    position: sticky; left: 0; z-index: 2; text-align: left; font-weight: 700; font-size: 12.5px;
+    padding: 8px 12px; min-width: 170px; max-width: 200px; overflow: hidden; text-overflow: ellipsis;
+    box-shadow: 3px 0 0 var(--group-line);
+  }
+  tbody td.form { min-width: 40px; padding: 8px 3px; font-weight: 600; }
+  tbody td.money { font-weight: 600; }
+  tbody td.muted { color: var(--muted); }
+  /* finish chips fill the cell so a row of results reads like a scorecard */
+  td.f-win  { background: var(--win-bg) !important; color: var(--win-tx); font-weight: 800; }
+  td.f-t10  { background: var(--t10-bg) !important; color: var(--t10-tx); font-weight: 700; }
+  td.f-t25  { background: var(--t25-bg) !important; color: var(--t25-tx); }
+  td.f-made { background: var(--made-bg) !important; color: var(--made-tx); }
+  td.f-mc   { background: var(--mc-bg) !important;  color: var(--mc-tx); font-weight: 700; }
+  .wave { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10.5px; font-weight: 700; }
+  .wave.early { background: #f3d77f; color: #3d2f05; }
+  .wave.late  { background: #7aa7d9; color: #0c2440; }
+  .wave .t { font-weight: 500; opacity: .85; margin-left: 4px; }
+  /* Pin star */
+  .pin {
+    background: none; border: none; padding: 0 6px 0 0; margin: 0; cursor: pointer;
+    font-size: 14px; line-height: 1; color: var(--muted); opacity: .55; vertical-align: -1px;
+  }
+  .pin:hover { opacity: 1; color: var(--gold); }
+  .pin.on { color: var(--gold); opacity: 1; }
+  .pin:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; border-radius: 3px; }
+  tbody tr.pinned td.name { color: var(--gold-strong); }
+  tbody tr.pin-last td { border-bottom: 3px solid var(--group-line); }
+  /* Frozen price columns: the last one carries the gold divider so it stays visible while the rest scrolls */
+  tbody td.frozen-last { box-shadow: inset -3px 0 0 var(--panel), 3px 0 0 var(--group-line) !important; }
+  thead th.frozen-last { box-shadow: 3px 0 0 #c9a94f; }
+  td.odds-cell { font-weight: 600; }
+  .empty-row td { padding: 24px; color: var(--muted); text-align: center; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; padding: 9px 14px 11px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--line); }
+  .legend .scale-bar { width: 220px; max-width: 40vw; height: 10px; border-radius: 5px; background: linear-gradient(90deg, rgb(206,86,74), rgb(235,160,140) 25%, rgb(236,230,204) 50%, rgb(147,207,148) 75%, rgb(47,158,98)); }
+  .legend .chip { display: inline-block; min-width: 30px; padding: 2px 6px; border-radius: 4px; text-align: center; font-weight: 700; margin-right: 4px; }
+
+  /* ---------- Glossary ---------- */
+  .glossary-wrap { display: none; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 18px 20px; }
+  .glossary-section { margin-bottom: 18px; max-width: 760px; }
+  .glossary-section h3 { margin: 0 0 8px; font-family: var(--display); font-weight: 600; font-size: 17px; letter-spacing: .03em; text-transform: uppercase; padding-bottom: 6px; border-bottom: 2px solid var(--gold); }
+  .glossary-section dl { margin: 0; display: grid; grid-template-columns: 150px 1fr; gap: 8px 16px; }
+  .glossary-section dt { font-weight: 700; font-size: 12.5px; text-transform: uppercase; letter-spacing: .03em; }
+  .glossary-section dd { margin: 0; font-size: 13px; line-height: 1.45; color: var(--muted); }
+  @media (max-width: 560px) {
+    .glossary-section dl { grid-template-columns: 1fr; gap: 2px; }
+    .glossary-section dd { margin-bottom: 8px; }
+    .brand-title { font-size: 19px; }
+    tbody td.name, thead th.name-h { min-width: 132px; max-width: 132px; }
+  }
+</style>
+</head>
+<body class="dark">
+<div class="shell">
+  <div class="header">
+    <div class="brand">
+      <span class="brand-top">⛳ PGA DFS First Look</span>
+      <span class="brand-title" id="eventName">Field Breakdown</span>
+    </div>
+    <div class="header-right">
+      <button id="themeToggle" class="theme-toggle" title="Toggle dark mode">☀️</button>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="field">Field</button>
+    <button class="tab-btn" data-tab="glossary">Glossary</button>
+  </div>
+
+  <div id="fieldView">
+    <div class="toolbar">
+      <input type="text" id="search" placeholder="Search golfer..." aria-label="Search golfer">
+      <div class="tool-group" id="waveGroup" hidden>
+        <span class="tool-label">Wave</span>
+        <div class="seg" id="waveSeg">
+          <button data-wave="" class="on">All</button>
+          <button data-wave="Early">Early</button>
+          <button data-wave="Late">Late</button>
+        </div>
+      </div>
+      <div class="tool-group" id="tierGroup" hidden>
+        <span class="tool-label">DK Price</span>
+        <div class="seg" id="tierSeg">
+          <button data-tier="" class="on">All</button>
+          <button data-tier="10">$10K+</button>
+          <button data-tier="9">$9K</button>
+          <button data-tier="8">$8K</button>
+          <button data-tier="7">$7K</button>
+          <button data-tier="6">$6K &amp; under</button>
+        </div>
+      </div>
+      <div class="tool-group">
+        <span class="tool-label">Form</span>
+        <select id="formRange" aria-label="Recent form weeks">
+          <option value="0">Hide</option>
+          <option value="12">Last 12 weeks</option>
+          <option value="26">Last 26 weeks</option>
+          <option value="52">Last 52 weeks</option>
+        </select>
+      </div>
+      <button class="tool-btn" id="clearPinsBtn" hidden>Clear pins</button>
+      <div style="position:relative;">
+        <button class="tool-btn" id="colToggleBtn">Columns ▾</button>
+        <div class="col-panel" id="colPanel">
+          <div class="row-actions">
+            <button class="tool-btn" id="showAllBtn">Show All</button>
+            <button class="tool-btn" id="hideMostBtn">Hide Most</button>
+          </div>
+          <div id="colList"></div>
+        </div>
+      </div>
+    </div>
+    <div class="table-wrap" id="tableWrap">
+      <table id="dataTable">
+        <thead id="thead"></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <div class="legend">
+      <span class="scale-label">MC / bottom of field</span>
+      <span class="scale-bar" aria-hidden="true"></span>
+      <span class="scale-label">Win / top of field</span>
+    </div>
+  </div>
+
+  <div class="glossary-wrap" id="glossaryWrap">
+    <div class="glossary-section">
+      <h3>Salaries &amp; Odds</h3>
+      <dl>
+        <dt>Win / Top 10 / Top 20</dt><dd>Odds to win outright, finish top 10 and finish top 20, in American format (+1800 pays $1,800 on a $100 bet). Sorting puts the shortest price first.</dd>
+        <dt>DraftKings / FanDuel</dt><dd>DraftKings and FanDuel salaries for this week's main slate.</dd>
+        <dt>R1 Tee Time</dt><dd>Each golfer's Round 1 tee time. The Wave filter uses it to split the field into the morning (Early) and afternoon (Late) waves.</dd>
+        <dt>Pins ★</dt><dd>Click the star next to a golfer to keep him at the top of the table, whatever the sort or filter. Pins are saved in your browser.</dd>
+        <dt>DK Price</dt><dd>Filters the field by DraftKings salary range.</dd>
+      </dl>
+    </div>
+    <div class="glossary-section">
+      <h3>Course History</h3>
+      <dl>
+        <dt>Cuts</dt><dd>Cuts made out of starts at this event.</dd>
+        <dt>Years</dt><dd>Finish at this event each year. A blank means he didn't play it that year.</dd>
+      </dl>
+    </div>
+    <div class="glossary-section">
+      <h3>Percentile Finishes</h3>
+      <dl>
+        <dt>Events</dt><dd>Number of events in the sample.</dd>
+        <dt>Cut %</dt><dd>Share of those events where he made the cut.</dd>
+        <dt>Top 25 / 10 / 5</dt><dd>Share of those events finishing inside the top 25, top 10 and top 5.</dd>
+      </dl>
+    </div>
+    <div class="glossary-section">
+      <h3>Recent Form</h3>
+      <dl>
+        <dt>LW, -2W …</dt><dd>Finish in each of the last 52 weeks. LW is last week, -2W two weeks ago, and so on. A blank means he didn't play that week.</dd>
+      </dl>
+    </div>
+    <div class="glossary-section">
+      <h3>Color Coding</h3>
+      <dl>
+        <dt>Finishes</dt><dd>Course history and recent form use one scale: the deepest green is a win, greens are top 10s and top 25s, sand is the middle of the pack, and red is a missed cut.</dd>
+        <dt>Percentages</dt><dd>Each percentile finish column is ranked against the rest of this week's field and shaded on the same scale, from red (bottom) to green (top).</dd>
+      </dl>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---------- Percentile shading (red -> sand -> green) ----------
+const STOPS = [[0,[206,86,74]],[0.25,[235,160,140]],[0.5,[236,230,204]],[0.75,[147,207,148]],[1,[47,158,98]]];
+function lerp(a,b,t){ return a+(b-a)*t; }
+function gradientColor(p) {
+  p = Math.max(0, Math.min(1, p));
+  let lo = STOPS[0], hi = STOPS[STOPS.length-1];
+  for (let i=0;i<STOPS.length-1;i++) if (p>=STOPS[i][0] && p<=STOPS[i+1][0]) { lo=STOPS[i]; hi=STOPS[i+1]; break; }
+  const t = (p-lo[0])/((hi[0]-lo[0])||1);
+  const c = [0,1,2].map(k => Math.round(lerp(lo[1][k],hi[1][k],t)));
+  const lum = 0.299*c[0]+0.587*c[1]+0.114*c[2];
+  return { bg: `rgb(${c})`, text: lum > 150 ? "#13261b" : "#ffffff" };
+}
+// Ranks ascending; ties share a percentile.
+function percentiles(rows, key) {
+  const vals = rows.map((r,i) => [i, r[key]]).filter(([,v]) => typeof v === "number");
+  const n = vals.length, out = {};
+  vals.sort((a,b) => a[1]-b[1]);
+  let i = 0;
+  while (i < n) {
+    let j = i; while (j+1 < n && vals[j+1][1] === vals[i][1]) j++;
+    const p = n > 1 ? ((i+j)/2)/(n-1) : 0.5;
+    for (let k=i;k<=j;k++) out[vals[k][0]] = p;
+    i = j+1;
+  }
+  return out;
+}
+
+// ---------- State ----------
+let DATA = { golfers: [] };
+let ROWS = [];
+let YEARS = [];
+let FORM_LEN = 0;
+let HAS_WAVE = false;
+let sortKey = "odds", sortDir = 1;
+let searchTerm = "", waveFilter = "", tierFilter = "";
+let PINS = new Set();
+try { PINS = new Set(JSON.parse(localStorage.getItem("pgafirstlook-pins") || "[]")); } catch (e) {}
+const savePins = () => { try { localStorage.setItem("pgafirstlook-pins", JSON.stringify([...PINS])); } catch (e) {} };
+const ODDS_AMERICAN = {};   // per odds column: true if the sheet already uses American odds
+let hidden = new Set();
+const urlParams = new URLSearchParams(location.search);
+let formRange = Number(urlParams.get("form")) || null;
+
+// ---------- Helpers ----------
+const isBlank = v => v === null || v === undefined || v === "";
+function finishVal(v) {            // sort value for a finish: 1 best, MC worst, blank = no value
+  if (isBlank(v)) return null;
+  const s = String(v).toUpperCase().replace(/^T/, "");
+  if (s === "MC" || s === "CUT" || s === "WD" || s === "DQ") return 1000;
+  const n = parseInt(s, 10);
+  return isNaN(n) ? null : n;
+}
+function finishClass(v) {
+  const n = finishVal(v);
+  if (n === null) return "";
+  if (n === 1000) return "f-mc";
+  if (n === 1) return "f-win";
+  if (n <= 10) return "f-t10";
+  if (n <= 25) return "f-t25";
+  return "f-made";
+}
+// Places a finish on the same red -> sand -> green scale as the percentage columns:
+// a win is the deepest green, top 10s and top 25s are green, the middle of the pack is sand,
+// and a missed cut is red.
+const FINISH_SCALE = [[1, 1], [5, 0.92], [10, 0.85], [25, 0.72], [40, 0.6], [55, 0.5], [70, 0.42], [90, 0.36]];
+function finishPct(v) {
+  const n = finishVal(v);
+  if (n === null) return null;
+  if (n === 1000) return 0.04;
+  for (let i = 0; i < FINISH_SCALE.length - 1; i++) {
+    const [a, pa] = FINISH_SCALE[i], [b, pb] = FINISH_SCALE[i + 1];
+    if (n <= b) return pa + (pb - pa) * (Math.max(n, a) - a) / (b - a);
+  }
+  return FINISH_SCALE[FINISH_SCALE.length - 1][1];
+}
+function finishText(v) {
+  if (isBlank(v)) return "";
+  const s = String(v).toUpperCase();
+  return s === "CUT" ? "MC" : String(v);
+}
+function cutsVal(v) {            // "3/4" -> sorts by made %, then by number made
+  if (isBlank(v)) return null;
+  const m = String(v).match(/(\d+)\s*\/\s*(\d+)/);
+  if (!m) return null;
+  const made = +m[1], played = +m[2];
+  return played ? made / played + made / 1000 : -1;
+}
+// Tee time -> minutes after midnight (null if unreadable). Accepts "8:12 AM", "1:05 PM", "13:05" or "8:12:00".
+function teeMinutes(v) {
+  if (isBlank(v)) return null;
+  const m = String(v).trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*([AaPp])?/);
+  if (!m) return null;
+  let h = +m[1]; const min = +m[2];
+  if (m[3]) { const pm = /p/i.test(m[3]); h = (h % 12) + (pm ? 12 : 0); }
+  else if (h >= 1 && h <= 5) h += 12;          // no AM/PM: golf tee times are never 1-5 AM
+  return h * 60 + min;
+}
+const fmtTee = t => { const h = Math.floor(t / 60), m = t % 60; return ((h % 12) || 12) + ":" + String(m).padStart(2, "0") + (h < 12 ? " AM" : " PM"); };
+function waveOf(r) {
+  if (r.wave) return /^l/i.test(r.wave) ? "Late" : "Early";
+  if (r.teeTime) {
+    const m = String(r.teeTime).match(/(\d{1,2}):(\d{2})\s*([AaPp])?/);
+    if (m) { let h = +m[1]; if (m[3] && /p/i.test(m[3]) && h < 12) h += 12; return h < 11 ? "Early" : "Late"; }
+  }
+  return "";
+}
+// Odds: the sheet may give X-to-1 (18) or American (+1800). Each column is read as a whole:
+// if every value is 100 or more in size it's American, otherwise it's X-to-1.
+function toAmerican(v, key) {
+  if (isBlank(v)) return null;
+  const n = Number(String(v).replace(/[+,\s]/g, ""));
+  if (isNaN(n) || n === 0) return null;
+  if (ODDS_AMERICAN[key]) return n;
+  return n >= 1 ? Math.round(n * 100) : -Math.round(100 / n);
+}
+const fmtOdds = a => a === null ? "—" : (a > 0 ? "+" + a : String(a));
+const oddsSort = a => a === null ? null : (a > 0 ? a / 100 : 100 / -a);   // payout per $1: smaller = shorter price
+function tierOf(dk) {
+  if (isBlank(dk)) return "";
+  const n = Number(dk);
+  return n >= 10000 ? "10" : n >= 9000 ? "9" : n >= 8000 ? "8" : n >= 7000 ? "7" : "6";
+}
+const money = v => isBlank(v) ? "—" : "$" + Number(v).toLocaleString("en-US");
+const normName = s => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
+// ---------- Columns ----------
+function buildColumns() {
+  const cols = [
+    { key: "dk", label: "DraftKings", group: "DFS Salaries", cls: "money", sort: r => r.dk, text: r => money(r.dk) },
+    { key: "fd", label: "FanDuel", group: "DFS Salaries", cls: "money", sort: r => r.fd, text: r => money(r.fd) },
+    ...ODDS_COLS.filter(o => o.show).map(o => ({ key: o.key, label: o.label, group: "Odds", cls: "odds-cell", odds: true,
+      sort: r => oddsSort(toAmerican(r[o.key], o.key)), text: r => fmtOdds(toAmerican(r[o.key], o.key)) })),
+  ];
+  if (ROWS.some(r => r._tee !== null)) cols.push({ key: "teeTime", label: "R1 Tee Time", group: "Tee Times",
+    sort: r => r._tee, lowGood: true, text: r => r._tee === null ? "—" : fmtTee(r._tee) });
+  cols.push({ key: "cuts", label: "Cuts", group: "Course History", sort: r => cutsVal(r.cuts), text: r => isBlank(r.cuts) ? "—" : r.cuts });
+  YEARS.forEach(y => cols.push({ key: "y" + y, label: y, group: "Course History", finish: r => r.history && r.history[y], sort: r => finishVal(r.history && r.history[y]), lowGood: true }));
+  [["events","Events"],["cutPct","Cut %"],["top25","Top 25"],["top10","Top 10"],["top5","Top 5"]].forEach(([k, l]) =>
+    cols.push({ key: k, label: l, group: "Percentile Finishes", sort: r => r[k], text: r => isBlank(r[k]) ? "—" : (k === "events" ? r[k] : r[k] + "%"), pct: k !== "events" }));
+  for (let i = 0; i < FORM_LEN; i++) {
+    cols.push({ key: "f" + i, label: i === 0 ? "LW" : "-" + (i + 1) + "W", group: "Recent Form", form: true, idx: i,
+      finish: r => r.form && r.form[i], sort: r => finishVal(r.form && r.form[i]), lowGood: true });
+  }
+  return cols;
+}
+let COLS = [];
+const ODDS_COLS = [{ key: "odds", label: "Win", show: true }, { key: "t10Odds", label: "Top 10", show: false }, { key: "t20Odds", label: "Top 20", show: false }];
+
+function visibleCols() {
+  return COLS.filter(c => c.form ? c.idx < formRange : !hidden.has(c.key));
+}
+
+// ---------- Render ----------
+function render() {
+  const cols = visibleCols();
+
+  // Header: group row + column row; the name header spans both.
+  const thead = document.getElementById("thead");
+  thead.innerHTML = "";
+  const gRow = document.createElement("tr"); gRow.className = "groups";
+  const cRow = document.createElement("tr"); cRow.className = "cols";
+  const nameG = document.createElement("th");
+  nameG.className = "name-h"; nameG.textContent = "Golfer";
+  gRow.appendChild(nameG);
+  const nameTh = document.createElement("th");
+  nameTh.className = "name-h"; nameTh.textContent = "Name";
+  if (sortKey === "name") nameTh.insertAdjacentHTML("beforeend", `<span class="arrow">${sortDir === 1 ? "▲" : "▼"}</span>`);
+  nameTh.addEventListener("click", () => setSort("name"));
+  cRow.appendChild(nameTh);
+  let lastGroup = null;
+  cols.forEach(col => {
+    const start = col.group !== lastGroup;
+    if (start) {
+      const span = cols.filter(c => c.group === col.group).length;
+      const g = document.createElement("th");
+      g.colSpan = span; g.textContent = col.group; g.className = "gstart";
+      gRow.appendChild(g);
+    }
+    lastGroup = col.group;
+    col._gstart = start;
+    col._gend = false;
+    if (start && cols.indexOf(col) > 0) cols[cols.indexOf(col) - 1]._gend = true;
+    const th = document.createElement("th");
+    th.textContent = col.label;
+    th.className = (col.form ? "form " : "") + (start ? "gstart" : "");
+    if (sortKey === col.key) th.insertAdjacentHTML("beforeend", `<span class="arrow">${sortDir === 1 ? "▲" : "▼"}</span>`);
+    th.addEventListener("click", () => setSort(col.key));
+    cRow.appendChild(th);
+  });
+  thead.appendChild(gRow); thead.appendChild(cRow);
+
+  // Rows
+  let rows = ROWS.slice();
+  if (searchTerm) { const t = normName(searchTerm); rows = rows.filter(r => normName(r.name).includes(t)); }
+  if (waveFilter) rows = rows.filter(r => r._wave === waveFilter);
+  if (tierFilter) rows = rows.filter(r => tierOf(r.dk) === tierFilter);
+  const col = COLS.find(c => c.key === sortKey);
+  const sv = sortKey === "name" ? (r => r.name) : (col ? col.sort : (() => null));
+  rows.sort((a, b) => {
+    const av = sv(a), bv = sv(b);
+    const an = isBlank(av), bn = isBlank(bv);
+    if (an && bn) return 0;
+    if (an) return 1;               // blanks always sink to the bottom
+    if (bn) return -1;
+    if (typeof av === "string") return av.localeCompare(bv) * sortDir;
+    return (av - bv) * sortDir;
+  });
+  // Pinned golfers sit on top in the current sort order and stay visible through any filter.
+  const pinned = ROWS.filter(r => PINS.has(normName(r.name)));
+  if (pinned.length) {
+    const pinnedSorted = pinned.slice();
+    const order = new Map(ROWS.map((r, i) => [r, i]));
+    pinnedSorted.sort((a, b) => {
+      const ia = rows.indexOf(a), ib = rows.indexOf(b);
+      if (ia !== -1 && ib !== -1) return ia - ib;
+      if (ia !== -1) return -1;
+      if (ib !== -1) return 1;
+      return order.get(a) - order.get(b);
+    });
+    rows = pinnedSorted.concat(rows.filter(r => !PINS.has(normName(r.name))));
+  }
+  document.getElementById("clearPinsBtn").hidden = !pinned.length;
+
+  const tbody = document.getElementById("tbody");
+  tbody.innerHTML = "";
+  if (!rows.length) {
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="${cols.length + 1}">No golfers match that search.</td></tr>`;
+  }
+  const frag = document.createDocumentFragment();
+  rows.forEach(r => {
+    const tr = document.createElement("tr");
+    const isPinned = PINS.has(normName(r.name));
+    if (isPinned) { tr.classList.add("pinned"); if (rows[rows.indexOf(r) + 1] && !PINS.has(normName(rows[rows.indexOf(r) + 1].name))) tr.classList.add("pin-last"); }
+    const nameTd = document.createElement("td");
+    nameTd.className = "name"; nameTd.title = r.name;
+    const star = document.createElement("button");
+    star.className = "pin" + (isPinned ? " on" : "");
+    star.textContent = isPinned ? "★" : "☆";
+    star.setAttribute("aria-label", (isPinned ? "Unpin " : "Pin ") + r.name);
+    star.addEventListener("click", e => {
+      e.stopPropagation();
+      const k = normName(r.name);
+      PINS.has(k) ? PINS.delete(k) : PINS.add(k);
+      savePins(); render();
+    });
+    nameTd.appendChild(star);
+    nameTd.appendChild(document.createTextNode(r.name));
+    tr.appendChild(nameTd);
+    cols.forEach(c => {
+      const td = document.createElement("td");
+      const classes = [];
+      if (c._gstart) classes.push("gstart");
+      if (c._gend) classes.push("gend");
+      if (c.form) classes.push("form");
+      if (c.cls) classes.push(c.cls);
+      if (c.finish) {
+        const v = c.finish(r);
+        td.textContent = finishText(v);
+        const fp = finishPct(v);
+        if (fp !== null) { const g = gradientColor(fp); td.style.background = g.bg; td.style.color = g.text; td.style.fontWeight = "600"; }
+      } else if (c.wave) {
+        if (r._wave) td.innerHTML = `<span class="wave ${r._wave.toLowerCase()}">${r._wave}${r.teeTime ? `<span class="t">${r.teeTime}</span>` : ""}</span>`;
+        else { td.textContent = "—"; classes.push("muted"); }
+      } else {
+        td.textContent = c.text(r);
+        if (c.pct && r["_p_" + c.key] !== undefined) {
+          const g = gradientColor(r["_p_" + c.key]);
+          td.style.background = g.bg; td.style.color = g.text;
+        }
+      }
+      td.className = classes.join(" ");
+      tr.appendChild(td);
+    });
+    frag.appendChild(tr);
+  });
+  tbody.appendChild(frag);
+  freezePriceColumns(cols);
+}
+
+// Keeps the DFS salary columns next to the name while the rest of the table scrolls sideways.
+// Skipped on narrow screens, where frozen columns would take up most of the view.
+function freezePriceColumns(cols) {
+  const wrap = document.getElementById("tableWrap");
+  const headCells = document.querySelectorAll("#thead tr.cols th");
+  const frozen = [];
+  cols.forEach((c, i) => { if (c.group === "DFS Salaries") frozen.push(i + 1); });
+  if (!frozen.length || frozen[0] !== 1) return;
+  let left = headCells[0].offsetWidth;
+  const lefts = frozen.map(ci => { const l = left; left += headCells[ci].offsetWidth; return l; });
+  if (left > wrap.clientWidth * 0.55) return;
+  const lastCi = frozen[frozen.length - 1];
+  const place = (cell, l, z, isLast) => {
+    cell.style.position = "sticky"; cell.style.left = l + "px"; cell.style.zIndex = z;
+    if (isLast) cell.classList.add("frozen-last");
+  };
+  frozen.forEach((ci, k) => place(headCells[ci], lefts[k], 4, ci === lastCi));
+  const g = document.querySelector("#thead tr.groups th:nth-child(2)");
+  if (g) { g.style.position = "sticky"; g.style.left = lefts[0] + "px"; g.style.zIndex = 4; g.classList.add("frozen-last"); }
+  document.querySelectorAll("#tbody tr:not(.empty-row)").forEach(tr => {
+    frozen.forEach((ci, k) => { const td = tr.cells[ci]; if (td) place(td, lefts[k], 2, ci === lastCi); });
+  });
+}
+let resizeTimer = null;
+window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (COLS.length) render(); }, 150); });
+
+function setSort(key) {
+  if (sortKey === key) sortDir *= -1;
+  else {
+    sortKey = key;
+    const c = COLS.find(x => x.key === key);
+    // Lower-is-better columns start ascending; percentages and counts start with the best at the top.
+    sortDir = (key === "name" || (c && (c.odds || c.lowGood || c.form))) ? 1 : -1;
+  }
+  render();
+}
+
+// ---------- Column panel ----------
+function populateColumnPanel() {
+  const list = document.getElementById("colList");
+  list.innerHTML = "";
+  let last = null;
+  COLS.filter(c => !c.form).forEach(c => {
+    if (c.group !== last) { const h = document.createElement("h4"); h.textContent = c.group; list.appendChild(h); last = c.group; }
+    const label = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = !hidden.has(c.key);
+    cb.addEventListener("change", () => { cb.checked ? hidden.delete(c.key) : hidden.add(c.key); render(); });
+    label.appendChild(cb); label.appendChild(document.createTextNode(" " + c.label));
+    list.appendChild(label);
+  });
+  const h = document.createElement("h4"); h.textContent = "Recent Form"; list.appendChild(h);
+  const note = document.createElement("div");
+  note.style.cssText = "font-size:11px;color:var(--muted);";
+  note.textContent = "Use the Form menu to choose how many weeks to show.";
+  list.appendChild(note);
+}
+
+// ---------- Wiring ----------
+document.getElementById("search").addEventListener("input", e => { searchTerm = e.target.value; render(); });
+document.querySelectorAll("#waveSeg button").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll("#waveSeg button").forEach(x => x.classList.toggle("on", x === b));
+  waveFilter = b.dataset.wave; render();
+}));
+document.querySelectorAll("#tierSeg button").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll("#tierSeg button").forEach(x => x.classList.toggle("on", x === b));
+  tierFilter = b.dataset.tier; render();
+}));
+document.getElementById("clearPinsBtn").addEventListener("click", () => { PINS.clear(); savePins(); render(); });
+document.getElementById("formRange").addEventListener("change", e => {
+  formRange = Number(e.target.value);
+  try { localStorage.setItem("pgafirstlook-form", String(formRange)); } catch (err) {}
+  render();
+});
+document.getElementById("colToggleBtn").addEventListener("click", () => document.getElementById("colPanel").classList.toggle("open"));
+document.getElementById("showAllBtn").addEventListener("click", () => { hidden.clear(); populateColumnPanel(); render(); });
+document.getElementById("hideMostBtn").addEventListener("click", () => {
+  COLS.filter(c => !c.form && !c.odds && !["dk", "fd", "wave"].includes(c.key)).forEach(c => hidden.add(c.key));
+  populateColumnPanel(); render();
+});
+document.addEventListener("click", e => {
+  const panel = document.getElementById("colPanel"), btn = document.getElementById("colToggleBtn");
+  if (!panel.contains(e.target) && e.target !== btn) panel.classList.remove("open");
+});
+document.querySelectorAll(".tab-btn").forEach(btn => btn.addEventListener("click", () => {
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b === btn));
+  const g = btn.dataset.tab === "glossary";
+  document.getElementById("fieldView").style.display = g ? "none" : "flex";
+  document.getElementById("glossaryWrap").style.display = g ? "block" : "none";
+}));
+
+// ---------- Theme (dark default; ?theme=light|dark overrides) ----------
+function applyTheme(dark) {
+  document.body.classList.toggle("dark", dark);
+  document.getElementById("themeToggle").textContent = dark ? "☀️" : "🌙";
+}
+let savedTheme = null;
+try { savedTheme = localStorage.getItem("pgafirstlook-theme"); } catch (e) {}
+applyTheme((urlParams.get("theme") || savedTheme) !== "light");
+document.getElementById("themeToggle").addEventListener("click", () => {
+  const dark = !document.body.classList.contains("dark");
+  applyTheme(dark);
+  try { localStorage.setItem("pgafirstlook-theme", dark ? "dark" : "light"); } catch (e) {}
+});
+
+
+// ---------- Load ----------
+// Each event gets its own permanent file (e.g. rsm-classic-2026.json), picked with ?event=rsm-classic-2026
+// (or ?week=) in the embed URL, so an article keeps its own week's table. With neither, the page reads
+// latest.json, a small pointer naming the current event.
+const requested = [urlParams.get("event"), urlParams.get("week")].find(v => /^[A-Za-z0-9_-]{1,60}$/.test(v || "")) || "";
+function loadData() {
+  const get = f => fetch(f + ".json?v=" + Date.now()).then(r => { if (!r.ok) throw new Error(f + ".json not found (HTTP " + r.status + ")"); return r.json(); });
+  if (requested) return get(requested);
+  return fetch("latest.json?v=" + Date.now()).then(r => r.ok ? r.json() : null).catch(() => null)
+    .then(l => get(l && l.current ? l.current : "data"));
+}
+
+loadData().then(json => {
+  DATA = json;
+  ROWS = (json.golfers || []).filter(r => r && r.name);
+  const yearSet = new Set();
+  ROWS.forEach(r => {
+    Object.keys(r.history || {}).forEach(y => yearSet.add(y));
+    FORM_LEN = Math.max(FORM_LEN, (r.form || []).length);
+    r._wave = waveOf(r);
+    r._tee = teeMinutes(r.teeTime);
+  });
+  YEARS = [...yearSet].sort((a, b) => b.localeCompare(a));
+  HAS_WAVE = ROWS.some(r => r._wave);
+  ODDS_COLS.forEach(o => {
+    const vals = ROWS.map(r => Number(String(r[o.key] ?? "").replace(/[+,\s]/g, ""))).filter(v => !isNaN(v) && v !== 0);
+    o.show = o.key === "odds" || vals.length > 0;
+    ODDS_AMERICAN[o.key] = vals.length > 0 && vals.every(v => Math.abs(v) >= 100);
+  });
+  document.getElementById("tierGroup").hidden = !ROWS.some(r => !isBlank(r.dk));
+  document.getElementById("waveGroup").hidden = !HAS_WAVE;
+  ["cutPct", "top25", "top10", "top5"].forEach(k => {
+    const p = percentiles(ROWS, k);
+    ROWS.forEach((r, i) => { if (p[i] !== undefined) r["_p_" + k] = p[i]; });
+  });
+  if (json.event) { document.getElementById("eventName").textContent = json.event; document.title = "PGA DFS First Look · " + json.event; }
+
+  if (formRange === null) { try { formRange = Number(localStorage.getItem("pgafirstlook-form")) || null; } catch (e) {} }
+  if (formRange === null || isNaN(formRange)) formRange = 26;
+  formRange = Math.min(formRange, FORM_LEN);
+  const sel = document.getElementById("formRange");
+  [...sel.options].forEach(o => { if (Number(o.value) > FORM_LEN && o.value !== "0") o.hidden = true; });
+  if (![...sel.options].some(o => Number(o.value) === formRange)) {
+    const o = document.createElement("option"); o.value = formRange; o.textContent = "Last " + formRange + " weeks"; sel.appendChild(o);
+  }
+  sel.value = String(formRange);
+
+  COLS = buildColumns();
+  populateColumnPanel();
+  render();
+}).catch(err => {
+  document.getElementById("tbody").innerHTML =
+    '<tr class="empty-row"><td colspan="20">Could not load the table data. If you opened this file directly (file://), it needs to be served over http(s), e.g. GitHub Pages.</td></tr>';
+  console.error(err);
+});
+</script>
+</body>
+</html>
